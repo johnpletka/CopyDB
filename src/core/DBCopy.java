@@ -15,6 +15,7 @@ public class DBCopy {
     Properties prop = null;
     Connection fromCon = null;
     Connection toCon = null;
+    int batchsize = 1000;
     public DBCopy(Properties prop) throws Exception{
         this.prop = prop;
         if(this.prop == null){
@@ -22,6 +23,9 @@ public class DBCopy {
         }
         verifyRequiredProperties(prop,new String[]{"fromdb.driver","todb.driver","fromdb.url","fromdb.uid","fromdb.pwd","todb.url","todb.uid","todb.pwd"});
         setupConnections();
+        if(prop.contains("batchsize")){
+            this.batchsize = Integer.parseInt(prop.getProperty("batchsize"));
+        }
     }
     public void verifyRequiredProperties(Properties p,String[] required){
         for(int i=0;i<required.length;i++){
@@ -138,33 +142,47 @@ public class DBCopy {
 
         }
         System.out.println("Beginning copying "+table.getTableName());
-        ResultSet fromRs = selectStmt.executeQuery();
-        String insertSql = "insert into "+table.getTableName()+" (";
-        for(int i=1; i<= fromRs.getMetaData().getColumnCount();i++){
-            if(i>1){
-                insertSql += ",";
-            }
-            insertSql += fromRs.getMetaData().getColumnName(i);
-        }
-        insertSql += ") values(";
-        for(int i=0;i<fromRs.getMetaData().getColumnCount();i++){
-            if(i>0){
-                insertSql += ",";
-            }
-            insertSql += "?";
-        }
-        insertSql += ")";
-        System.out.println("Insert Statement: "+insertSql);
-        PreparedStatement insertStmt = toCon.prepareStatement(insertSql);
-        while(fromRs.next()){
+        ResultSet fromRs = null;
+        PreparedStatement insertStmt = null;
+        try{
+            fromRs = selectStmt.executeQuery();
+            String insertSql = "insert into "+table.getTableName()+" (";
             for(int i=1; i<= fromRs.getMetaData().getColumnCount();i++){
-                insertStmt.setObject(i, fromRs.getObject(i));
+                if(i>1){
+                    insertSql += ",";
+                }
+                insertSql += fromRs.getMetaData().getColumnName(i);
             }
-            insertStmt.addBatch();
-            insertStmt.clearParameters();
+            insertSql += ") values(";
+            for(int i=0;i<fromRs.getMetaData().getColumnCount();i++){
+                if(i>0){
+                    insertSql += ",";
+                }
+                insertSql += "?";
+            }
+            insertSql += ")";
+            System.out.println("Insert Statement: "+insertSql);
+            insertStmt = toCon.prepareStatement(insertSql);
+            int batchCounter = 0;
+            while(fromRs.next()){
+                for(int i=1; i<= fromRs.getMetaData().getColumnCount();i++){
+                    insertStmt.setObject(i, fromRs.getObject(i));
+                }
+                insertStmt.addBatch();
+                insertStmt.clearParameters();
+                batchCounter++;
+                if(batchCounter >= batchsize){
+                    insertStmt.executeBatch();
+                    insertStmt.clearBatch();
+                }
+            }
+            int[] keys = insertStmt.executeBatch();
+            System.out.println("Inserted "+keys.length+" rows");
+        }finally{
+            if(fromRs != null) fromRs.close();
+            if(insertStmt != null) insertStmt.close();
         }
-        int[] keys = insertStmt.executeBatch();
-        System.out.println("Inserted "+keys.length+" rows");
+
     }
     public void outputTables(Connection conn) throws SQLException{
         ResultSet rs = null;
