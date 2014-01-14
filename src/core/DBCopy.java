@@ -129,7 +129,7 @@ public class DBCopy {
                 }
             }
             selectStmt = fromCon.prepareStatement("select * from "+table.getTableName()+" where "+table.getDiffColumn()+" > ?");
-            selectStmt.setObject(1,fromMax);
+            selectStmt.setObject(1,toMax);
         }
         if("all".equals(table.getDiffModel())){
             selectStmt = fromCon.prepareStatement("select * from "+table.getTableName());
@@ -162,6 +162,8 @@ public class DBCopy {
             }
             insertSql += ")";
             System.out.println("Insert Statement: "+insertSql);
+            Statement allowIdentityStmt = toCon.createStatement();
+            allowIdentityStmt.execute("SET IDENTITY_INSERT "+table.getTableName()+" ON");
             insertStmt = toCon.prepareStatement(insertSql);
             int batchCounter = 0;
             while(fromRs.next()){
@@ -177,6 +179,8 @@ public class DBCopy {
                 }
             }
             int[] keys = insertStmt.executeBatch();
+            allowIdentityStmt.execute("SET IDENTITY_INSERT "+table.getTableName()+" OFF");
+            allowIdentityStmt.close();
             System.out.println("Inserted "+keys.length+" rows");
         }finally{
             if(fromRs != null) fromRs.close();
