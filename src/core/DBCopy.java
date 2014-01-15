@@ -42,6 +42,7 @@ public class DBCopy {
         }
         fromCon = DriverManager.getConnection(prop.getProperty("fromdb.url"),prop.getProperty("fromdb.uid"),prop.getProperty("fromdb.pwd"));
         toCon = DriverManager.getConnection(prop.getProperty("todb.url"),prop.getProperty("todb.uid"),prop.getProperty("todb.pwd"));
+        toCon.setAutoCommit(false);
 
     }
     public void go() throws Exception{
@@ -139,7 +140,17 @@ public class DBCopy {
             PreparedStatement delStmt = toCon.prepareStatement("delete from "+table.getTableName());
             delStmt.execute();
             delStmt.close();
+            toCon.commit();
 
+        }
+        Statement allowIdentityStmt = null;
+        try{
+            allowIdentityStmt = toCon.createStatement();
+            allowIdentityStmt.execute("SET IDENTITY_INSERT "+table.getTableName()+" ON");
+        }catch(Exception e){
+            System.out.println("Skipping turning off identity_insert because no identity column present");
+        }finally{
+            if(allowIdentityStmt != null) allowIdentityStmt.close();
         }
         System.out.println("Beginning copying "+table.getTableName());
         ResultSet fromRs = null;
@@ -162,8 +173,6 @@ public class DBCopy {
             }
             insertSql += ")";
             System.out.println("Insert Statement: "+insertSql);
-            Statement allowIdentityStmt = toCon.createStatement();
-            allowIdentityStmt.execute("SET IDENTITY_INSERT "+table.getTableName()+" ON");
             insertStmt = toCon.prepareStatement(insertSql);
             int batchCounter = 0;
             while(fromRs.next()){
@@ -173,18 +182,25 @@ public class DBCopy {
                 insertStmt.addBatch();
                 insertStmt.clearParameters();
                 batchCounter++;
-                if(batchCounter >= batchsize){
+                if(batchCounter % batchsize == 0){
                     insertStmt.executeBatch();
                     insertStmt.clearBatch();
                 }
             }
             int[] keys = insertStmt.executeBatch();
-            allowIdentityStmt.execute("SET IDENTITY_INSERT "+table.getTableName()+" OFF");
-            allowIdentityStmt.close();
-            System.out.println("Inserted "+keys.length+" rows");
+            toCon.commit();
+            System.out.println("Inserted "+batchCounter+" rows");
         }finally{
             if(fromRs != null) fromRs.close();
             if(insertStmt != null) insertStmt.close();
+        }
+        try{
+            allowIdentityStmt = toCon.createStatement();
+            allowIdentityStmt.execute("SET IDENTITY_INSERT "+table.getTableName()+" OFF");
+        }catch(Exception e){
+            System.out.println("Skipping turning off identity_insert because no identity column present");
+        }finally{
+            if(allowIdentityStmt != null) allowIdentityStmt.close();
         }
 
     }
